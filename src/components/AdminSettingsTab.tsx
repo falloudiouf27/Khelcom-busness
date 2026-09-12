@@ -288,12 +288,14 @@ export const AdminSettingsTab: React.FC<AdminSettingsTabProps> = ({
   const handleUpdatePin = (e: React.FormEvent) => {
     e.preventDefault();
     const storedPin = StorageService.getAdminPin();
-    const envAdminPassword = import.meta.env.VITE_ADMIN_PASSWORD || 'Khelcom2212026';
+    const envAdminPassword = import.meta.env.VITE_ADMIN_PASSWORD;
 
-    const isValidCurrent = 
-      currentPin.trim() === storedPin || 
-      currentPin.trim() === 'Khelcom2212026' || 
-      currentPin.trim() === envAdminPassword;
+    const validCurrentPasswords: string[] = [
+      storedPin,
+      ...(envAdminPassword ? [envAdminPassword] : [])
+    ].filter(Boolean);
+
+    const isValidCurrent = validCurrentPasswords.includes(currentPin.trim());
 
     if (!isValidCurrent) {
       setPinMessage({ type: 'error', text: 'Le code PIN / mot de passe actuel est incorrect.' });

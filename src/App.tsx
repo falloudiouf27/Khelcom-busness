@@ -984,7 +984,6 @@ export default function App() {
 
       {/* Footer with Nianing Showroom details & Admin trigger on Footer Logo */}
       <Footer
-        onOpenArchitecture={() => setIsArchitectureOpen(true)}
         onOpenAdmin={handleOpenAdmin}
         onOpenTracking={() => {
           setTrackingQuery('');

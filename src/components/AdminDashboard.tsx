@@ -131,6 +131,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 }) => {
   const [isAuthenticated, setIsAuthenticated] = useState(StorageService.isAdminAuthenticated());
   const [passwordInput, setPasswordInput] = useState('');
+  const [loginAttempts, setLoginAttempts] = useState(0);
+  const [loginBlocked, setLoginBlocked] = useState(false);
+  const [blockTimer, setBlockTimer] = useState(0);
   const [authError, setAuthError] = useState('');
 
   // Dashboard Tabs: 'orders' | 'products' | 'brands' | 'ratings' | 'stats' | 'settings'
@@ -185,22 +188,49 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
   const handleLogin = (e: React.FormEvent) => {
     e.preventDefault();
+    if (loginBlocked) return;
+
     const storedPin = StorageService.getAdminPin();
     const envAdminPassword = import.meta.env.VITE_ADMIN_PASSWORD;
-    const validPasswords = [
-      'Khelcom2212026',
-      'khelcom2212026',
-      storedPin,
-      storedPin.toLowerCase(),
-      ...(envAdminPassword ? [envAdminPassword, envAdminPassword.toLowerCase()] : [])
-    ];
+    const inputTrimmed = passwordInput.trim();
 
-    if (validPasswords.includes(passwordInput.trim())) {
+    // Only compare against stored PIN and env variable — no hardcoded fallback in code
+    const validPasswords: string[] = [
+      storedPin,
+      ...(envAdminPassword ? [envAdminPassword] : [])
+    ].filter(Boolean);
+
+    if (validPasswords.length === 0) {
+      setAuthError('Configuration requise : définissez VITE_ADMIN_PASSWORD dans votre fichier .env');
+      return;
+    }
+
+    if (validPasswords.includes(inputTrimmed)) {
       StorageService.setAdminAuthenticated(true);
       setIsAuthenticated(true);
       setAuthError('');
+      setLoginAttempts(0);
     } else {
-      setAuthError('Mot de passe incorrect. Code d\'accès Khelcom requis.');
+      const newAttempts = loginAttempts + 1;
+      setLoginAttempts(newAttempts);
+      if (newAttempts >= 5) {
+        setLoginBlocked(true);
+        let remaining = 30;
+        setBlockTimer(remaining);
+        setAuthError(`Trop de tentatives. Accès bloqué 30 secondes.`);
+        const interval = setInterval(() => {
+          remaining -= 1;
+          setBlockTimer(remaining);
+          if (remaining <= 0) {
+            clearInterval(interval);
+            setLoginBlocked(false);
+            setLoginAttempts(0);
+            setAuthError('');
+          }
+        }, 1000);
+      } else {
+        setAuthError(`Mot de passe incorrect. Tentative ${newAttempts}/5.`);
+      }
     }
   };
 
@@ -556,9 +586,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 </button>
                 <button
                   type="submit"
-                  className="flex-1 py-3 px-4 rounded-xl bg-orange-500 hover:bg-orange-400 text-white font-black text-xs transition-all shadow-md shadow-orange-500/20 active:scale-95 cursor-pointer text-center"
+                  disabled={loginBlocked}
+                  className={`flex-1 py-3 px-4 rounded-xl font-black text-xs transition-all shadow-md active:scale-95 text-center ${
+                    loginBlocked
+                      ? 'bg-gray-700 text-gray-400 cursor-not-allowed shadow-none'
+                      : 'bg-orange-500 hover:bg-orange-400 text-white shadow-orange-500/20 cursor-pointer'
+                  }`}
                 >
-                  Déverrouiller
+                  {loginBlocked ? `Bloqué (${blockTimer}s)` : 'Déverrouiller'}
                 </button>
               </div>
             </form>

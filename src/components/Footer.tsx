@@ -7,20 +7,17 @@ import {
   ShieldCheck, 
   Truck, 
   Store, 
-  MessageCircle, 
-  Code2
+  MessageCircle
 } from 'lucide-react';
 import { SHOWROOM_INFO } from '../data/senegalLocations';
 import { Logo } from './Logo';
 
 interface FooterProps {
-  onOpenArchitecture: () => void;
   onOpenAdmin: () => void;
   onOpenTracking: () => void;
 }
 
 export const Footer: React.FC<FooterProps> = ({
-  onOpenArchitecture,
   onOpenAdmin,
   onOpenTracking,
 }) => {
@@ -144,10 +141,10 @@ export const Footer: React.FC<FooterProps> = ({
             </ul>
           </div>
 
-          {/* Quick Links & Dev/Architecture */}
+          {/* Liens rapides */}
           <div className="lg:col-span-3 space-y-3">
             <h4 className="text-xs font-bold uppercase tracking-wider text-white">
-              Espace Client & Architecture
+              Espace Client
             </h4>
             <ul className="space-y-2">
               <li>
@@ -156,15 +153,6 @@ export const Footer: React.FC<FooterProps> = ({
                   className="hover:text-orange-400 transition-colors text-left cursor-pointer"
                 >
                   Suivi de commande en temps réel
-                </button>
-              </li>
-              <li>
-                <button
-                  onClick={onOpenArchitecture}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#250a48] hover:bg-[#340f66] text-orange-300 font-semibold border border-orange-500/30 transition-colors mt-2 cursor-pointer"
-                >
-                  <Code2 className="w-3.5 h-3.5" />
-                  <span>Script SQL Supabase & Next.js</span>
                 </button>
               </li>
             </ul>
