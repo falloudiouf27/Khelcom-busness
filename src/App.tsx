@@ -25,6 +25,7 @@ import {
 } from 'lucide-react';
 import { CartItem, Order, Product, ProductVariant, AppSettings, DeliveryType } from './types';
 import { StorageService } from './services/storage';
+import { SupabaseService } from './services/supabaseService';
 import { BRANDS, CATEGORIES } from './data/mockProducts';
 import { SHOWROOM_INFO, SENEGAL_DELIVERY_ZONES, DISTANCE_DELIVERY_ZONES } from './data/senegalLocations';
 import { formatFCFA } from './utils/formatters';
@@ -103,6 +104,25 @@ export default function App() {
     setCart(StorageService.getCart());
     setSettings(StorageService.getSettings());
 
+    // Sync with Supabase on startup
+    StorageService.syncWithSupabase().then((res) => {
+      if (res.products && res.products.length > 0) setProducts(res.products);
+      if (res.orders && res.orders.length > 0) setOrders(res.orders);
+      if (res.settings) setSettings(res.settings);
+      if (res.brands && res.brands.length > 0) setAvailableBrands(res.brands);
+    });
+
+    // Realtime Supabase Subscriptions
+    const unsubProducts = SupabaseService.subscribeToProducts((liveProducts) => {
+      setProducts(liveProducts);
+      localStorage.setItem('khelcom_products_v4', JSON.stringify(liveProducts));
+    });
+
+    const unsubOrders = SupabaseService.subscribeToOrders((liveOrders) => {
+      setOrders(liveOrders);
+      localStorage.setItem('khelcom_orders_v4', JSON.stringify(liveOrders));
+    });
+
     // Secret Admin Route Detector (/khelcom_business/admin, /#admin, ?admin=1)
     const checkAdminRoute = () => {
       const hash = window.location.hash.toLowerCase();
@@ -127,6 +147,8 @@ export default function App() {
     return () => {
       window.removeEventListener('hashchange', checkAdminRoute);
       window.removeEventListener('popstate', checkAdminRoute);
+      unsubProducts();
+      unsubOrders();
     };
   }, []);
 

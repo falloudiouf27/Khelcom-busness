@@ -1,6 +1,7 @@
 import { Order, Product, CartItem, AppSettings, OrderItem, ProductReview } from '../types';
 import { INITIAL_PRODUCTS, BRANDS as DEFAULT_BRANDS } from '../data/mockProducts';
 import { SHOWROOM_INFO } from '../data/senegalLocations';
+import { SupabaseService } from './supabaseService';
 
 const STORAGE_KEYS = {
   PRODUCTS: 'khelcom_products_v4',
@@ -67,6 +68,13 @@ export const StorageService = {
   saveProducts(products: Product[]): void {
     try {
       localStorage.setItem(STORAGE_KEYS.PRODUCTS, JSON.stringify(products));
+      if (SupabaseService.isAvailable()) {
+        products.forEach((p) => {
+          SupabaseService.upsertProduct(p).catch((err) =>
+            console.warn('[StorageService] Error syncing product to Supabase:', err)
+          );
+        });
+      }
     } catch (e) {
       console.error('Error saving products to storage', e);
     }
@@ -498,6 +506,11 @@ export const StorageService = {
       if (order.orderNumber) {
         this.addRecentTrackedOrderNumber(order.orderNumber);
       }
+      if (SupabaseService.isAvailable()) {
+        SupabaseService.insertOrder(order).catch((err) =>
+          console.warn('[StorageService] Error syncing order to Supabase:', err)
+        );
+      }
     } catch (e) {
       console.error('Error saving order', e);
     }
@@ -530,6 +543,15 @@ export const StorageService = {
     orders[index] = updatedOrder;
     try {
       localStorage.setItem(STORAGE_KEYS.ORDERS, JSON.stringify(orders));
+      if (SupabaseService.isAvailable()) {
+        SupabaseService.updateOrderStatus(orderId, status, {
+          paymentValidatedAt: updatedOrder.paymentValidatedAt,
+          paymentValidatedBy: updatedOrder.paymentValidatedBy,
+          adminNotes: updatedOrder.adminNotes,
+        }).catch((err) =>
+          console.warn('[StorageService] Error syncing order status to Supabase:', err)
+        );
+      }
     } catch (e) {
       console.error('Error updating order', e);
     }
@@ -541,6 +563,11 @@ export const StorageService = {
     const updated = orders.filter((o) => o.id !== orderId);
     try {
       localStorage.setItem(STORAGE_KEYS.ORDERS, JSON.stringify(updated));
+      if (SupabaseService.isAvailable()) {
+        SupabaseService.deleteOrder(orderId).catch((err) =>
+          console.warn('[StorageService] Error deleting order in Supabase:', err)
+        );
+      }
     } catch (e) {
       console.error('Error deleting order', e);
     }
@@ -763,6 +790,11 @@ export const StorageService = {
     const products = this.getProducts();
     const updated = products.filter((p) => p.id !== productId);
     this.saveProducts(updated);
+    if (SupabaseService.isAvailable()) {
+      SupabaseService.deleteProduct(productId).catch((err) =>
+        console.warn('[StorageService] Error deleting product from Supabase:', err)
+      );
+    }
     return updated;
   },
 
@@ -862,6 +894,11 @@ export const StorageService = {
   saveSettings(settings: AppSettings): void {
     try {
       localStorage.setItem(STORAGE_KEYS.SETTINGS, JSON.stringify(settings));
+      if (SupabaseService.isAvailable()) {
+        SupabaseService.saveSettings(settings).catch((err) =>
+          console.warn('[StorageService] Error saving settings to Supabase:', err)
+        );
+      }
     } catch (e) {
       console.error('Error saving settings', e);
     }
@@ -1019,5 +1056,52 @@ export const StorageService = {
 
   resetBrands(): string[] {
     return this.saveBrands(DEFAULT_BRANDS);
+  },
+
+  // CLOUD SYNC WITH SUPABASE
+  async syncWithSupabase(): Promise<{
+    products?: Product[];
+    orders?: Order[];
+    settings?: AppSettings;
+    brands?: string[];
+  }> {
+    if (!SupabaseService.isAvailable()) return {};
+    try {
+      const [prods, ords, sttngs, brnds] = await Promise.all([
+        SupabaseService.fetchProducts(),
+        SupabaseService.fetchOrders(),
+        SupabaseService.fetchSettings(),
+        SupabaseService.fetchBrands(),
+      ]);
+
+      const result: {
+        products?: Product[];
+        orders?: Order[];
+        settings?: AppSettings;
+        brands?: string[];
+      } = {};
+
+      if (prods !== null && prods.length > 0) {
+        localStorage.setItem(STORAGE_KEYS.PRODUCTS, JSON.stringify(prods));
+        result.products = prods;
+      }
+      if (ords !== null && ords.length > 0) {
+        localStorage.setItem(STORAGE_KEYS.ORDERS, JSON.stringify(ords));
+        result.orders = ords;
+      }
+      if (sttngs !== null) {
+        localStorage.setItem(STORAGE_KEYS.SETTINGS, JSON.stringify(sttngs));
+        result.settings = sttngs;
+      }
+      if (brnds !== null && brnds.length > 0) {
+        localStorage.setItem(STORAGE_KEYS.BRANDS, JSON.stringify(brnds));
+        result.brands = brnds;
+      }
+
+      return result;
+    } catch (e) {
+      console.warn('[StorageService] Error during syncWithSupabase:', e);
+      return {};
+    }
   },
 };
