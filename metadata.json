@@ -1,0 +1,6 @@
+{
+  "name": "Khelcom Business",
+  "description": "E-commerce & vitrine d'électronique et électroménager à Nianing (Sénégal) - Vente, gestion de stock temps réel, variantes, retrait showroom & livraison en FCFA",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
