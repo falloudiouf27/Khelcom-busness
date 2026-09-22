@@ -783,6 +783,12 @@ export const StorageService = {
     }
 
     this.saveProducts(updated);
+    if (SupabaseService.isAvailable()) {
+      const targetProd = updated.find((p) => p.id === product.id) || product;
+      SupabaseService.upsertProduct(targetProd).catch((err) =>
+        console.warn('[StorageService] Error directly syncing upserted product to Supabase:', err)
+      );
+    }
     return updated;
   },
 

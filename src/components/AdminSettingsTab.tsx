@@ -33,6 +33,7 @@ import {
 } from 'lucide-react';
 import { AppSettings, Order, Product, DeliveryZone } from '../types';
 import { StorageService } from '../services/storage';
+import { SupabaseService } from '../services/supabaseService';
 import { formatFCFA } from '../utils/formatters';
 import { 
   SENEGAL_14_REGIONS, 
@@ -399,9 +400,17 @@ export const AdminSettingsTab: React.FC<AdminSettingsTabProps> = ({
       
       {/* Save Notification Banner */}
       {saveSuccess && (
-        <div className="p-3.5 bg-emerald-500/20 border border-emerald-500/40 rounded-2xl text-emerald-300 text-xs font-bold flex items-center gap-2 animate-in fade-in">
-          <Check className="w-4 h-4 text-emerald-400" />
-          <span>Paramètres de la boutique enregistrés avec succès !</span>
+        <div className={`p-3.5 rounded-2xl text-xs font-bold flex items-center gap-2 animate-in fade-in ${
+          SupabaseService.isAvailable()
+            ? 'bg-emerald-500/20 border border-emerald-500/40 text-emerald-300'
+            : 'bg-amber-500/20 border border-amber-500/40 text-amber-300'
+        }`}>
+          <Check className="w-4 h-4 shrink-0" />
+          <span>
+            {SupabaseService.isAvailable()
+              ? 'Paramètres & Annonce enregistrés et synchronisés sur Supabase Cloud !'
+              : 'Paramètres & Annonce enregistrés en LOCAL uniquement (Redéployez sur Vercel pour synchroniser avec Supabase)'}
+          </span>
         </div>
       )}
 

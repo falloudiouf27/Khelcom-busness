@@ -22,6 +22,7 @@ interface HeroBannerProps {
   onOpenShowroom: () => void;
   brands?: string[];
   onSelectBrand?: (brand: string) => void;
+  announcement?: string;
 }
 
 export const HeroBanner: React.FC<HeroBannerProps> = ({
@@ -29,6 +30,7 @@ export const HeroBanner: React.FC<HeroBannerProps> = ({
   onOpenShowroom,
   brands: propBrands,
   onSelectBrand,
+  announcement,
 }) => {
   const currentBrands = propBrands && propBrands.length > 0 ? propBrands : StorageService.getBrands();
   const displayBrands = currentBrands.slice(0, 8);
@@ -47,10 +49,19 @@ export const HeroBanner: React.FC<HeroBannerProps> = ({
           {/* CSS Selector 1: Main Hero Copy (Left Column) */}
           <div className="lg:col-span-7 space-y-3.5 sm:space-y-4.5">
             
-            {/* Tag pill badge */}
-            <div className="inline-flex items-center gap-1.5 sm:gap-2 px-3 py-1 rounded-full bg-purple-950/90 border border-purple-800/80 text-orange-400 text-[11px] sm:text-xs font-semibold shadow-xs">
-              <Sparkles className="w-3.5 h-3.5 text-orange-400 shrink-0" />
-              <span className="truncate">Vente Directe & Showroom • Nianing</span>
+            {/* Tag pill badges & Announcement banner */}
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="inline-flex items-center gap-1.5 sm:gap-2 px-3 py-1 rounded-full bg-purple-950/90 border border-purple-800/80 text-orange-400 text-[11px] sm:text-xs font-semibold shadow-xs">
+                <Sparkles className="w-3.5 h-3.5 text-orange-400 shrink-0" />
+                <span className="truncate">Vente Directe & Showroom • Nianing</span>
+              </div>
+
+              {announcement && announcement.trim() && (
+                <div className="inline-flex items-center gap-1.5 sm:gap-2 px-3 py-1 rounded-full bg-gradient-to-r from-orange-500/20 to-amber-500/20 border border-orange-500/40 text-orange-300 text-[11px] sm:text-xs font-bold shadow-sm">
+                  <Flame className="w-3.5 h-3.5 text-orange-400 shrink-0 animate-bounce" />
+                  <span className="line-clamp-1">{announcement}</span>
+                </div>
+              )}
             </div>
 
             {/* H1 Heading */}

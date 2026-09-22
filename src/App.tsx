@@ -532,6 +532,7 @@ export default function App() {
 
       {/* Hero Showcase Banner */}
       <HeroBanner
+        announcement={settings.bannerAnnouncement}
         brands={availableBrands}
         onSelectBrand={(brand) => {
           setSelectedBrand(brand);

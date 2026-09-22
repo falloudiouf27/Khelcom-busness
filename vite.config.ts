@@ -11,6 +11,8 @@ export default defineConfig(() => {
         '@': path.resolve(__dirname, '.'),
       },
     },
+    // Autorise les variables VITE_ ainsi que SUPABASE_ (sécurité et flexibilité pour Vercel)
+    envPrefix: ['VITE_', 'SUPABASE_'],
     server: {
       port: 5173,
       // HMR is disabled in AI Studio via DISABLE_HMR env var.

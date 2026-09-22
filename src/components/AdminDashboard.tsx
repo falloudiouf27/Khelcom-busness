@@ -40,6 +40,7 @@ import {
 } from 'lucide-react';
 import { AppSettings, Order, OrderStatus, Product, ProductVariant } from '../types';
 import { StorageService } from '../services/storage';
+import { SupabaseService } from '../services/supabaseService';
 import { BRANDS, CATEGORIES } from '../data/mockProducts';
 import { formatFCFA, formatDate } from '../utils/formatters';
 import { generateOrderInvoicePDF } from '../services/pdfGenerator';
@@ -512,6 +513,22 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
           {/* Right: Actions (Logout / Shop switch) */}
           <div className="flex items-center gap-2 shrink-0">
+            {/* Supabase status indicator badge */}
+            {SupabaseService.isAvailable() ? (
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 text-[11px] font-bold">
+                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                <span>Supabase Cloud</span>
+              </span>
+            ) : (
+              <span 
+                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-amber-500/15 border border-amber-500/30 text-amber-300 text-[11px] font-bold"
+                title="Supabase non connecté. Les annonces et produits restent enregistrés dans ce navigateur. Ajoutez les clés dans Vercel et redéployez pour publier en ligne."
+              >
+                <span className="w-2 h-2 rounded-full bg-amber-400"></span>
+                <span>Mode Local (Hors-Ligne)</span>
+              </span>
+            )}
+
             {isAuthenticated && (
               <button
                 type="button"
@@ -603,6 +620,23 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         /* 3. AUTHENTICATED DASHBOARD CONTENT */
         <main className="flex-1 max-w-7xl w-full mx-auto p-2.5 sm:p-6 space-y-3.5 sm:space-y-6 flex flex-col">
           
+          {/* Cloud Sync Warning if Local Mode */}
+          {!SupabaseService.isAvailable() && (
+            <div className="p-3.5 sm:p-4 rounded-2xl bg-amber-500/15 border border-amber-500/30 text-amber-200 text-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-md">
+              <div className="flex items-start gap-2.5">
+                <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                <div>
+                  <p className="font-bold text-amber-300">
+                    Mode Local Actif (Hors Ligne Cloud)
+                  </p>
+                  <p className="text-amber-200/80 text-[11px] mt-0.5">
+                    Vos annonces et produits sont enregistrés sur cet appareil uniquement. Pour les publier en ligne pour tous les visiteurs, assurez-vous que les clés <code className="bg-amber-950/60 px-1 py-0.5 rounded text-amber-300 font-mono">VITE_SUPABASE_URL</code> et <code className="bg-amber-950/60 px-1 py-0.5 rounded text-amber-300 font-mono">VITE_SUPABASE_ANON_KEY</code> sont ajoutées sur Vercel et cliquez sur <strong>Redeploy</strong>.
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* KPI Stat Cards */}
           <section aria-label="Indicateurs clés" className="grid grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-4">
             <div className="bg-[#190633] border border-purple-800/80 rounded-2xl p-3 sm:p-4.5 space-y-1 shadow-lg min-w-0">
