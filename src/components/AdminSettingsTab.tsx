@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { 
   Building2, 
   Phone, 
+  Mail,
   MapPin, 
   Clock, 
   FileText, 
@@ -29,7 +30,9 @@ import {
   Sparkles,
   Home,
   Building,
-  X
+  X,
+  Cloud,
+  Loader2
 } from 'lucide-react';
 import { AppSettings, Order, Product, DeliveryZone } from '../types';
 import { StorageService } from '../services/storage';
@@ -61,7 +64,14 @@ export const AdminSettingsTab: React.FC<AdminSettingsTabProps> = ({
   onOrdersUpdated,
 }) => {
   const [formData, setFormData] = useState<AppSettings>({ ...settings });
-  const [saveSuccess, setSaveSuccess] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [saveStatus, setSaveStatus] = useState<{
+    type: 'success_cloud' | 'success_local' | 'error';
+    message: string;
+  } | null>(null);
+
+  const [isSyncingAll, setIsSyncingAll] = useState(false);
+  const [syncAllResult, setSyncAllResult] = useState<{ success: boolean; message: string } | null>(null);
 
   // Delivery fee deactivation / hiding mode
   const [hideDeliveryFees, setHideDeliveryFees] = useState<boolean>(Boolean(settings.hideDeliveryFees));
@@ -216,6 +226,11 @@ export const AdminSettingsTab: React.FC<AdminSettingsTabProps> = ({
   const [confirmPin, setConfirmPin] = useState('');
   const [pinMessage, setPinMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
+  // Email admin : sécurisé via hash SHA-256 dans le fichier .env (VITE_ADMIN_EMAIL_HASH ou VITE_ADMIN_EMAIL).
+  // L'email n'est jamais affiché ni modifiable depuis l'interface — voir l'encart informatif
+  // dans la section Sécurité ci-dessous.
+  const isAdminEmailConfigured = Boolean((import.meta.env.VITE_ADMIN_EMAIL_HASH || import.meta.env.VITE_ADMIN_EMAIL || '').trim());
+
   // Import state
   const [importText, setImportText] = useState('');
   const [showImportModal, setShowImportModal] = useState(false);
@@ -225,7 +240,7 @@ export const AdminSettingsTab: React.FC<AdminSettingsTabProps> = ({
     setFormData((prev) => ({ ...prev, [field]: value }));
   };
 
-  const handleSaveSettings = (e: React.FormEvent) => {
+  const handleSaveSettings = async (e: React.FormEvent) => {
     e.preventDefault();
 
     const errors: { nianing?: string; distance?: string; region?: string } = {};
@@ -280,10 +295,58 @@ export const AdminSettingsTab: React.FC<AdminSettingsTabProps> = ({
       customNeighborhoods,
     };
 
-    StorageService.saveSettings(updatedSettings);
+    setIsSaving(true);
+    setSaveStatus(null);
+
+    const res = await StorageService.saveSettingsAsync(updatedSettings);
+    setIsSaving(false);
     onSettingsUpdated(updatedSettings);
-    setSaveSuccess(true);
-    setTimeout(() => setSaveSuccess(false), 3000);
+
+    if (res.cloud) {
+      setSaveStatus({
+        type: 'success_cloud',
+        message: '✓ Paramètres & Annonce enregistrés et publiés en direct sur Supabase Cloud ! (Visible sur tous vos appareils)',
+      });
+    } else if (res.success) {
+      setSaveStatus({
+        type: 'success_local',
+        message: `⚠️ Enregistré en LOCAL uniquement : ${res.error || 'Supabase non connecté'}. Pensez à déployer les variables sur Vercel.`,
+      });
+    } else {
+      setSaveStatus({
+        type: 'error',
+        message: `❌ Erreur : ${res.error}`,
+      });
+    }
+
+    setTimeout(() => setSaveStatus(null), 6000);
+  };
+
+  const handlePushAllToCloud = async () => {
+    setIsSyncingAll(true);
+    setSyncAllResult(null);
+    try {
+      const res = await StorageService.pushAllLocalDataToSupabase();
+      if (res.success) {
+        setSyncAllResult({
+          success: true,
+          message: `✓ Succès ! Paramètres, annonces et ${res.productsSynced} produit(s) ont été envoyés vers Supabase Cloud !`,
+        });
+      } else {
+        setSyncAllResult({
+          success: false,
+          message: `Échec : ${res.error || 'Supabase inaccessible'}`,
+        });
+      }
+    } catch (err: any) {
+      setSyncAllResult({
+        success: false,
+        message: `Erreur inattendue : ${err.message}`,
+      });
+    } finally {
+      setIsSyncingAll(false);
+      setTimeout(() => setSyncAllResult(null), 8000);
+    }
   };
 
   const handleUpdatePin = (e: React.FormEvent) => {
@@ -399,18 +462,36 @@ export const AdminSettingsTab: React.FC<AdminSettingsTabProps> = ({
     <div className="flex-1 overflow-y-auto p-3.5 sm:p-6 space-y-6 sm:space-y-8">
       
       {/* Save Notification Banner */}
-      {saveSuccess && (
+      {saveStatus && (
         <div className={`p-3.5 rounded-2xl text-xs font-bold flex items-center gap-2 animate-in fade-in ${
-          SupabaseService.isAvailable()
+          saveStatus.type === 'success_cloud'
             ? 'bg-emerald-500/20 border border-emerald-500/40 text-emerald-300'
-            : 'bg-amber-500/20 border border-amber-500/40 text-amber-300'
+            : saveStatus.type === 'success_local'
+            ? 'bg-amber-500/20 border border-amber-500/40 text-amber-300'
+            : 'bg-rose-500/20 border border-rose-500/40 text-rose-300'
         }`}>
-          <Check className="w-4 h-4 shrink-0" />
-          <span>
-            {SupabaseService.isAvailable()
-              ? 'Paramètres & Annonce enregistrés et synchronisés sur Supabase Cloud !'
-              : 'Paramètres & Annonce enregistrés en LOCAL uniquement (Redéployez sur Vercel pour synchroniser avec Supabase)'}
-          </span>
+          {saveStatus.type === 'success_cloud' ? (
+            <Check className="w-4 h-4 shrink-0 text-emerald-400" />
+          ) : (
+            <AlertTriangle className="w-4 h-4 shrink-0 text-amber-400" />
+          )}
+          <span>{saveStatus.message}</span>
+        </div>
+      )}
+
+      {/* Sync All Result Banner */}
+      {syncAllResult && (
+        <div className={`p-3.5 rounded-2xl text-xs font-bold flex items-center gap-2 animate-in fade-in ${
+          syncAllResult.success
+            ? 'bg-emerald-500/20 border border-emerald-500/40 text-emerald-300'
+            : 'bg-rose-500/20 border border-rose-500/40 text-rose-300'
+        }`}>
+          {syncAllResult.success ? (
+            <Check className="w-4 h-4 shrink-0 text-emerald-400" />
+          ) : (
+            <AlertTriangle className="w-4 h-4 shrink-0 text-rose-400" />
+          )}
+          <span>{syncAllResult.message}</span>
         </div>
       )}
 
@@ -1201,10 +1282,20 @@ export const AdminSettingsTab: React.FC<AdminSettingsTabProps> = ({
         <div className="flex justify-end">
           <button
             type="submit"
-            className="px-6 py-3 rounded-2xl bg-orange-500 hover:bg-orange-400 text-white font-extrabold text-xs transition-all shadow-md active:scale-98 flex items-center gap-2 cursor-pointer"
+            disabled={isSaving}
+            className="px-6 py-3 rounded-2xl bg-orange-500 hover:bg-orange-400 disabled:bg-orange-500/50 text-white font-extrabold text-xs transition-all shadow-md active:scale-98 flex items-center gap-2 cursor-pointer disabled:cursor-not-allowed"
           >
-            <Save className="w-4 h-4" />
-            <span>Enregistrer Tous les Paramètres</span>
+            {isSaving ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin" />
+                <span>Envoi vers Supabase...</span>
+              </>
+            ) : (
+              <>
+                <Save className="w-4 h-4" />
+                <span>Enregistrer & Publier</span>
+              </>
+            )}
           </button>
         </div>
 
@@ -1279,6 +1370,38 @@ export const AdminSettingsTab: React.FC<AdminSettingsTabProps> = ({
             </button>
           </div>
         </form>
+
+        {/* Admin Email — sécurisé via .env, jamais affiché en clair */}
+        <div className="pt-4 border-t border-purple-900/40 space-y-3">
+          <div className="flex items-center gap-2">
+            <Mail className="w-4 h-4 text-orange-400" />
+            <h4 className="text-xs font-bold text-white">Email de Connexion Administrateur</h4>
+          </div>
+          <p className="text-xs text-purple-300/80">
+            L'espace d'administration demande <strong className="text-purple-100">l'email ET le mot de passe</strong>. Par sécurité, l'email n'est jamais affiché ici : il est configuré uniquement dans le fichier <code className="bg-purple-950/60 px-1 py-0.5 rounded text-purple-300 font-mono">.env</code> (variable <code className="bg-purple-950/60 px-1 py-0.5 rounded text-purple-300 font-mono">VITE_ADMIN_EMAIL_HASH</code>).
+            La session expire automatiquement après 72 heures.
+          </p>
+
+          <div
+            className={`p-3 rounded-xl text-xs font-bold flex items-center gap-2 border ${
+              isAdminEmailConfigured
+                ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300'
+                : 'bg-rose-500/15 border-rose-500/40 text-rose-300'
+            }`}
+          >
+            {isAdminEmailConfigured ? (
+              <>
+                <Check className="w-4 h-4 shrink-0" />
+                <span>Email administrateur sécurisé et actif (haché, invisible côté interface).</span>
+              </>
+            ) : (
+              <>
+                <AlertTriangle className="w-4 h-4 shrink-0" />
+                <span>Configuration requise : ajoutez VITE_ADMIN_EMAIL_HASH dans le fichier .env puis redéployez.</span>
+              </>
+            )}
+          </div>
+        </div>
       </div>
 
       {/* Section 5: Data Management, Backup & Reset */}
@@ -1292,7 +1415,30 @@ export const AdminSettingsTab: React.FC<AdminSettingsTabProps> = ({
           Exportez l'ensemble du catalogue et des commandes en format JSON sécurisé, ou restaurez une sauvegarde précédente.
         </p>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 pt-2">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 pt-2">
+          {/* PUSH ALL TO SUPABASE CLOUD - Top Priority Button */}
+          <button
+            type="button"
+            onClick={handlePushAllToCloud}
+            disabled={isSyncingAll || !SupabaseService.isAvailable()}
+            className="p-3.5 rounded-2xl bg-gradient-to-br from-emerald-950/60 to-[#110421] hover:from-emerald-900/70 hover:to-[#180630] border border-emerald-700/60 hover:border-emerald-500/80 text-left transition-all group cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed sm:col-span-2 lg:col-span-1"
+            title={!SupabaseService.isAvailable() ? 'Supabase non connecté. Ajoutez vos clés sur Vercel.' : 'Envoyer toutes les données locales vers Supabase Cloud'}
+          >
+            {isSyncingAll ? (
+              <Loader2 className="w-5 h-5 text-emerald-400 mb-2 animate-spin" />
+            ) : (
+              <Cloud className="w-5 h-5 text-emerald-400 mb-2 group-hover:scale-110 transition-transform" />
+            )}
+            <div className="text-xs font-bold text-white">
+              {isSyncingAll ? 'Envoi en cours...' : '☁ Pousser tout vers Cloud'}
+            </div>
+            <div className="text-[10px] text-emerald-300/70 mt-0.5">
+              {SupabaseService.isAvailable()
+                ? 'Annonces + Produits → Supabase'
+                : 'Supabase non connecté'}
+            </div>
+          </button>
+
           {/* Export JSON */}
           <button
             type="button"

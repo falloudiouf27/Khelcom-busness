@@ -8,11 +8,16 @@ const STORAGE_KEYS = {
   ORDERS: 'khelcom_orders_v4',
   CART: 'khelcom_cart_v4',
   ADMIN_AUTH: 'khelcom_admin_auth_v1',
+  ADMIN_SESSION: 'khelcom_admin_session_v1',
   SETTINGS: 'khelcom_settings_v1',
   ADMIN_PIN: 'khelcom_admin_pin_v1',
   BRANDS: 'khelcom_brands_v2',
   LAST_TRACKED: 'khelcom_last_tracked_orders_v4',
 };
+
+// Durée de vie d'une session admin (en heures) : l'admin doit se reconnecter
+// avec son email + mot de passe une fois la session expirée.
+export const ADMIN_SESSION_DURATION_HOURS = 72;
 
 const DEFAULT_SETTINGS: AppSettings = {
   showroomName: SHOWROOM_INFO.name,
@@ -910,6 +915,23 @@ export const StorageService = {
     }
   },
 
+  async saveSettingsAsync(settings: AppSettings): Promise<{ success: boolean; cloud: boolean; error?: string }> {
+    try {
+      localStorage.setItem(STORAGE_KEYS.SETTINGS, JSON.stringify(settings));
+      if (SupabaseService.isAvailable()) {
+        const cloudRes = await SupabaseService.saveSettings(settings);
+        if (!cloudRes.success) {
+          return { success: true, cloud: false, error: cloudRes.error };
+        }
+        return { success: true, cloud: true };
+      }
+      return { success: true, cloud: false, error: 'Supabase n\'est pas connecté sur cet appareil.' };
+    } catch (e: any) {
+      console.error('Error saving settings async', e);
+      return { success: false, cloud: false, error: e?.message || 'Erreur lors de la sauvegarde' };
+    }
+  },
+
   getAdminPin(): string {
     try {
       return localStorage.getItem(STORAGE_KEYS.ADMIN_PIN) || 'Khelcom2212026';
@@ -960,22 +982,115 @@ export const StorageService = {
   // ADMIN AUTH
   isAdminAuthenticated(): boolean {
     try {
-      return localStorage.getItem(STORAGE_KEYS.ADMIN_AUTH) === 'true';
+      const session = this.getAdminSession();
+      return session !== null;
     } catch {
       return false;
     }
   },
 
-  setAdminAuthenticated(auth: boolean): void {
+  /**
+   * Session admin avec expiration automatique (72h par défaut).
+   * Retourne null si l'admin n'est pas connecté ou si la session a expiré.
+   */
+  getAdminSession(): { email: string | null; loginAt: number; expiresAt: number } | null {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEYS.ADMIN_SESSION);
+      if (!raw) return null;
+      const parsed = JSON.parse(raw);
+      if (
+        parsed &&
+        typeof parsed.loginAt === 'number' &&
+        typeof parsed.expiresAt === 'number'
+      ) {
+        if (Date.now() >= parsed.expiresAt) {
+          // Session expirée → déconnexion automatique
+          localStorage.removeItem(STORAGE_KEYS.ADMIN_SESSION);
+          localStorage.removeItem(STORAGE_KEYS.ADMIN_AUTH);
+          return null;
+        }
+        return parsed;
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  },
+
+  /**
+   * Temps restant avant expiration de la session admin (ms).
+   * 0 si déconnecté ou déjà expiré.
+   */
+  getAdminSessionRemainingMs(): number {
+    const session = this.getAdminSession();
+    if (!session) return 0;
+    return Math.max(0, session.expiresAt - Date.now());
+  },
+
+  /**
+   * Connecte l'admin : enregistre l'email et crée une session de 72h.
+   */
+  setAdminAuthenticated(auth: boolean, email?: string): void {
     try {
       if (auth) {
+        const loginAt = Date.now();
+        const expiresAt = loginAt + ADMIN_SESSION_DURATION_HOURS * 60 * 60 * 1000;
+        localStorage.setItem(
+          STORAGE_KEYS.ADMIN_SESSION,
+          JSON.stringify({ email: email ?? null, loginAt, expiresAt })
+        );
         localStorage.setItem(STORAGE_KEYS.ADMIN_AUTH, 'true');
       } else {
+        localStorage.removeItem(STORAGE_KEYS.ADMIN_SESSION);
         localStorage.removeItem(STORAGE_KEYS.ADMIN_AUTH);
       }
     } catch (e) {
       console.error('Error setting admin auth', e);
     }
+  },
+
+  // ADMIN EMAIL — sécurisé : l'email admin n'est JAMAIS stocké ni affiché en clair.
+  // Seul son hash SHA-256 (venant du fichier .env) est embarqué dans le bundle.
+
+  /**
+   * Calcule le hash SHA-256 (hex) d'un email, avec normalisation trim + lowercase.
+   * Utilisé pour comparer l'email saisi au hash stocké dans VITE_ADMIN_EMAIL_HASH.
+   */
+  async hashAdminEmail(email: string): Promise<string> {
+    const normalized = email.trim().toLowerCase();
+    const data = new TextEncoder().encode(normalized);
+    const digest = await crypto.subtle.digest('SHA-256', data);
+    return Array.from(new Uint8Array(digest))
+      .map((b) => b.toString(16).padStart(2, '0'))
+      .join('');
+  },
+
+  /**
+   * Vérifie si l'email saisi correspond à l'email admin.
+   * Comparaison par hash SHA-256 : l'email admin réel n'apparaît jamais côté client.
+   * Supporte à la fois VITE_ADMIN_EMAIL_HASH (recommandé) ou VITE_ADMIN_EMAIL (haché à la volée).
+   * Retourne { ok, reason } pour afficher un message de configuration si le .env est incomplet.
+   */
+  async verifyAdminEmail(email: string): Promise<{ ok: boolean; reason?: 'no_hash' }> {
+    const rawEnv = (
+      import.meta.env.VITE_ADMIN_EMAIL_HASH ||
+      (import.meta.env as any).VITE_ADMIN_EMAIL ||
+      ''
+    ).trim();
+
+    if (!rawEnv) {
+      // Email admin non configuré côté .env → aucune connexion possible
+      return { ok: false, reason: 'no_hash' };
+    }
+
+    // Si la valeur passée est un hash SHA-256 de 64 caractères hex
+    const isSha256Hex = /^[a-f0-9]{64}$/i.test(rawEnv);
+    const targetHash = isSha256Hex
+      ? rawEnv.toLowerCase()
+      : await this.hashAdminEmail(rawEnv);
+
+    const inputHash = await this.hashAdminEmail(email);
+    return { ok: inputHash === targetHash };
   },
 
   // BRANDS MANAGEMENT
@@ -1109,5 +1224,11 @@ export const StorageService = {
       console.warn('[StorageService] Error during syncWithSupabase:', e);
       return {};
     }
+  },
+
+  async pushAllLocalDataToSupabase(): Promise<{ success: boolean; productsSynced: number; error?: string }> {
+    const products = this.getProducts();
+    const settings = this.getSettings();
+    return SupabaseService.syncAllLocalToCloud(products, settings);
   },
 };

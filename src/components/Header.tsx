@@ -29,7 +29,6 @@ interface HeaderProps {
   cartCount: number;
   onOpenCart: () => void;
   onOpenAdmin: () => void;
-  onOpenArchitecture: () => void;
   onOpenTracking: () => void;
   onOpenFilters: () => void;
   activeFiltersCount?: number;
@@ -66,7 +65,6 @@ export const Header: React.FC<HeaderProps> = ({
   cartCount,
   onOpenCart,
   onOpenAdmin,
-  onOpenArchitecture,
   onOpenTracking,
   onOpenFilters,
   activeFiltersCount = 0,

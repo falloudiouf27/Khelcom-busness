@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, lazy, Suspense } from 'react';
 import { 
   Lock, 
   Package, 
@@ -36,10 +36,11 @@ import {
   Calendar,
   CreditCard,
   Star,
-  Tag
+  Tag,
+  Database
 } from 'lucide-react';
 import { AppSettings, Order, OrderStatus, Product, ProductVariant } from '../types';
-import { StorageService } from '../services/storage';
+import { StorageService, ADMIN_SESSION_DURATION_HOURS } from '../services/storage';
 import { SupabaseService } from '../services/supabaseService';
 import { BRANDS, CATEGORIES } from '../data/mockProducts';
 import { formatFCFA, formatDate } from '../utils/formatters';
@@ -47,6 +48,12 @@ import { generateOrderInvoicePDF } from '../services/pdfGenerator';
 import { AdminProductModal } from './AdminProductModal';
 import { AdminOrderDetailsModal } from './AdminOrderDetailsModal';
 import { AdminSettingsTab } from './AdminSettingsTab';
+
+// Chargement paresseux : le contenu SQL/technique n'est JAMAIS téléchargé
+// par les visiteurs du site public, uniquement quand un admin ouvre le modal.
+const ArchitectureModal = lazy(() =>
+  import('./ArchitectureModal').then((m) => ({ default: m.ArchitectureModal }))
+);
 import { AdminRatingsTab } from './AdminRatingsTab';
 import { AdminStatsTab } from './AdminStatsTab';
 import { AdminBrandsTab } from './AdminBrandsTab';
@@ -64,6 +71,19 @@ interface AdminDashboardProps {
   settings?: AppSettings;
   onSettingsUpdated?: (settings: AppSettings) => void;
 }
+
+/**
+ * Formate le temps de session restant : "71h 59m" ou "2j 23h".
+ */
+const formatSessionRemaining = (ms: number): string => {
+  const totalMinutes = Math.floor(ms / 60_000);
+  const days = Math.floor(totalMinutes / (60 * 24));
+  const hours = Math.floor((totalMinutes % (60 * 24)) / 60);
+  const minutes = totalMinutes % 60;
+  if (days > 0) return `${days}j ${hours}h`;
+  if (hours > 0) return `${hours}h ${minutes.toString().padStart(2, '0')}m`;
+  return `${minutes}m`;
+};
 
 const getStatusBadge = (status: OrderStatus) => {
   switch (status) {
@@ -131,11 +151,48 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   onSettingsUpdated = () => {},
 }) => {
   const [isAuthenticated, setIsAuthenticated] = useState(StorageService.isAdminAuthenticated());
+  const [emailInput, setEmailInput] = useState('');
   const [passwordInput, setPasswordInput] = useState('');
   const [loginAttempts, setLoginAttempts] = useState(0);
   const [loginBlocked, setLoginBlocked] = useState(false);
   const [blockTimer, setBlockTimer] = useState(0);
   const [authError, setAuthError] = useState('');
+
+  // Déconnexion automatique : la session admin expire après 72h.
+  // Un timer vérifie chaque minute si la session est encore valide.
+  const [sessionRemainingMs, setSessionRemainingMs] = useState<number>(() =>
+    StorageService.getAdminSessionRemainingMs()
+  );
+
+  useEffect(() => {
+    if (!isAuthenticated) return;
+
+    const checkSession = () => {
+      const remaining = StorageService.getAdminSessionRemainingMs();
+      if (remaining <= 0) {
+        // Session expirée : déconnexion automatique du tableau de bord
+        StorageService.setAdminAuthenticated(false);
+        setIsAuthenticated(false);
+        setEmailInput('');
+        setPasswordInput('');
+      } else {
+        setSessionRemainingMs(remaining);
+      }
+    };
+
+    checkSession();
+    const interval = setInterval(checkSession, 60_000);
+    return () => clearInterval(interval);
+  }, [isAuthenticated]);
+
+  // Rafraîchit l'affichage du temps restant toutes les minutes
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    const interval = setInterval(() => {
+      setSessionRemainingMs(StorageService.getAdminSessionRemainingMs());
+    }, 60_000);
+    return () => clearInterval(interval);
+  }, [isAuthenticated]);
 
   // Dashboard Tabs: 'orders' | 'products' | 'brands' | 'ratings' | 'stats' | 'settings'
   const [activeTab, setActiveTab] = useState<'orders' | 'products' | 'brands' | 'ratings' | 'stats' | 'settings'>('orders');
@@ -181,20 +238,59 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
   // Product Modal State
   const [isProductModalOpen, setIsProductModalOpen] = useState(false);
+  const [isArchitectureOpen, setIsArchitectureOpen] = useState(false);
   const [productToEdit, setProductToEdit] = useState<Product | null>(null);
   const [productToDelete, setProductToDelete] = useState<Product | null>(null);
   const [actionToast, setActionToast] = useState<{ message: string; type?: 'success' | 'info' } | null>(null);
 
   if (!isOpen) return null;
 
-  const handleLogin = (e: React.FormEvent) => {
+  const registerFailedAttempt = (message: string) => {
+    const newAttempts = loginAttempts + 1;
+    setLoginAttempts(newAttempts);
+    if (newAttempts >= 5) {
+      setLoginBlocked(true);
+      let remaining = 30;
+      setBlockTimer(remaining);
+      setAuthError(`Trop de tentatives. Accès bloqué 30 secondes.`);
+      const interval = setInterval(() => {
+        remaining -= 1;
+        setBlockTimer(remaining);
+        if (remaining <= 0) {
+          clearInterval(interval);
+          setLoginBlocked(false);
+          setLoginAttempts(0);
+          setAuthError('');
+        }
+      }, 1000);
+    } else {
+      setAuthError(message);
+    }
+  };
+
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     if (loginBlocked) return;
 
     const storedPin = StorageService.getAdminPin();
     const envAdminPassword = import.meta.env.VITE_ADMIN_PASSWORD;
     const inputTrimmed = passwordInput.trim();
+    const emailTrimmed = emailInput.trim().toLowerCase();
 
+    // 1. Vérification de l'email administrateur (comparaison par hash, email jamais en clair)
+    const emailCheck = await StorageService.verifyAdminEmail(emailTrimmed);
+
+    if (emailCheck.reason === 'no_hash') {
+      setAuthError('Configuration requise : définissez VITE_ADMIN_EMAIL_HASH dans votre fichier .env');
+      return;
+    }
+
+    if (!emailCheck.ok) {
+      registerFailedAttempt(`Email administrateur incorrect. Tentative ${loginAttempts + 1}/5.`);
+      return;
+    }
+
+    // 2. Vérification du mot de passe (PIN)
     // Only compare against stored PIN and env variable — no hardcoded fallback in code
     const validPasswords: string[] = [
       storedPin,
@@ -207,37 +303,20 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     }
 
     if (validPasswords.includes(inputTrimmed)) {
-      StorageService.setAdminAuthenticated(true);
+      StorageService.setAdminAuthenticated(true, emailTrimmed);
       setIsAuthenticated(true);
       setAuthError('');
       setLoginAttempts(0);
+      setSessionRemainingMs(StorageService.getAdminSessionRemainingMs());
     } else {
-      const newAttempts = loginAttempts + 1;
-      setLoginAttempts(newAttempts);
-      if (newAttempts >= 5) {
-        setLoginBlocked(true);
-        let remaining = 30;
-        setBlockTimer(remaining);
-        setAuthError(`Trop de tentatives. Accès bloqué 30 secondes.`);
-        const interval = setInterval(() => {
-          remaining -= 1;
-          setBlockTimer(remaining);
-          if (remaining <= 0) {
-            clearInterval(interval);
-            setLoginBlocked(false);
-            setLoginAttempts(0);
-            setAuthError('');
-          }
-        }, 1000);
-      } else {
-        setAuthError(`Mot de passe incorrect. Tentative ${newAttempts}/5.`);
-      }
+      registerFailedAttempt(`Mot de passe incorrect. Tentative ${loginAttempts + 1}/5.`);
     }
   };
 
   const handleLogout = () => {
     StorageService.setAdminAuthenticated(false);
     setIsAuthenticated(false);
+    setEmailInput('');
     setPasswordInput('');
   };
 
@@ -530,15 +609,27 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             )}
 
             {isAuthenticated && (
-              <button
-                type="button"
-                onClick={handleLogout}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-purple-950 hover:bg-purple-900 text-purple-200 text-xs font-semibold border border-purple-800 transition-colors cursor-pointer"
-                title="Verrouiller la session admin"
-              >
-                <LogOut className="w-3.5 h-3.5 text-purple-400" />
-                <span className="hidden sm:inline">Déconnexion</span>
-              </button>
+              <>
+                {/* Badge session restante : déconnexion auto après 72h */}
+                {sessionRemainingMs > 0 && (
+                  <span
+                    className="hidden lg:inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-purple-950/80 border border-purple-800 text-purple-300 text-[11px] font-bold"
+                    title={`Session sécurisée active. Déconnexion automatique après ${ADMIN_SESSION_DURATION_HOURS} heures.`}
+                  >
+                    <Clock className="w-3.5 h-3.5 text-orange-400" />
+                    <span>Session {formatSessionRemaining(sessionRemainingMs)}</span>
+                  </span>
+                )}
+                <button
+                  type="button"
+                  onClick={handleLogout}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-purple-950 hover:bg-purple-900 text-purple-200 text-xs font-semibold border border-purple-800 transition-colors cursor-pointer"
+                  title="Verrouiller la session admin"
+                >
+                  <LogOut className="w-3.5 h-3.5 text-purple-400" />
+                  <span className="hidden sm:inline">Déconnexion</span>
+                </button>
+              </>
             )}
             
             <button
@@ -564,11 +655,27 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             <div>
               <h2 className="text-xl font-black text-white">Accès Espace Direction</h2>
               <p className="text-xs sm:text-sm text-purple-300/80 mt-1.5 leading-relaxed">
-                Veuillez renseigner le mot de passe administrateur pour accéder à la gestion des commandes, des produits et des factures.
+                Veuillez renseigner votre email administrateur et le mot de passe pour accéder à la gestion des commandes, des produits et des factures.
               </p>
             </div>
 
             <form onSubmit={handleLogin} className="space-y-4 text-left">
+              <div>
+                <label className="block text-xs font-bold text-purple-200 mb-1.5">
+                  Email Administrateur
+                </label>
+                <input
+                  type="email"
+                  required
+                  autoComplete="username"
+                  value={emailInput}
+                  onChange={(e) => setEmailInput(e.target.value)}
+                  placeholder="votre.email@exemple.com"
+                  className="w-full bg-[#100220] border border-purple-700 text-white rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500"
+                  autoFocus
+                />
+              </div>
+
               <div>
                 <label className="block text-xs font-bold text-purple-200 mb-1.5">
                   Mot de passe / Code d'accès
@@ -576,11 +683,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 <input
                   type="password"
                   required
+                  autoComplete="current-password"
                   value={passwordInput}
                   onChange={(e) => setPasswordInput(e.target.value)}
                   placeholder="••••••••"
                   className="w-full bg-[#100220] border border-purple-700 text-white rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500"
-                  autoFocus
                 />
                 {authError && (
                   <p className="text-xs text-rose-400 mt-2 font-bold flex items-center gap-1">
@@ -636,6 +743,30 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               </div>
             </div>
           )}
+
+          {/* Architecture & SQL Access (Admin Only) */}
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2.5 p-3.5 sm:p-4 rounded-2xl bg-[#240845] border border-purple-900/60 shadow-md">
+              <div className="flex items-start gap-2.5 min-w-0">
+                <Database className="w-4 h-4 text-orange-400 shrink-0 mt-0.5" />
+                <div className="min-w-0">
+                  <p className="font-bold text-purple-100 text-xs">
+                    Schéma SQL & Architecture Technique
+                  </p>
+                  <p className="text-purple-300/80 text-[11px] mt-0.5">
+                    Documentation interne : tables Supabase, structure du projet & script SQL de déploiement.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsArchitectureOpen(true)}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#380e6b] text-orange-400 hover:bg-[#48138a] border border-orange-500/30 text-[11px] font-bold transition-all active:scale-95 shadow-xs cursor-pointer shrink-0"
+              >
+                <Database className="w-3.5 h-3.5" />
+                <span>Voir Schéma SQL & Architecture</span>
+                <ChevronRight className="w-3.5 h-3.5" />
+              </button>
+          </div>
 
           {/* KPI Stat Cards */}
           <section aria-label="Indicateurs clés" className="grid grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-4">
@@ -1973,6 +2104,16 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             </div>
           </div>
         </div>
+      )}
+
+      {/* Architecture & Supabase SQL Script Modal (Admin Only, lazy-loaded) */}
+      {isArchitectureOpen && (
+        <Suspense fallback={null}>
+          <ArchitectureModal
+            isOpen={true}
+            onClose={() => setIsArchitectureOpen(false)}
+          />
+        </Suspense>
       )}
 
       {/* Floating Action Toast Notification */}

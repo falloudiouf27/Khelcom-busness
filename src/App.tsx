@@ -8,9 +8,7 @@ import {
   ShieldCheck, 
   ArrowUpDown, 
   Search, 
-  ChevronRight,
   Layers,
-  Database,
   Code2,
   CheckCircle2,
   MessageCircle,
@@ -39,7 +37,6 @@ import { CheckoutModal } from './components/CheckoutModal';
 import { OrderSuccessModal } from './components/OrderSuccessModal';
 import { OrderTrackingModal } from './components/OrderTrackingModal';
 import { AdminDashboard } from './components/AdminDashboard';
-import { ArchitectureModal } from './components/ArchitectureModal';
 import { FilterModal, FilterState } from './components/FilterModal';
 import { Footer } from './components/Footer';
 import { MobileBottomNav } from './components/MobileBottomNav';
@@ -64,7 +61,6 @@ export default function App() {
   const [isCartOpen, setIsCartOpen] = useState<boolean>(false);
   const [isCheckoutOpen, setIsCheckoutOpen] = useState<boolean>(false);
   const [isAdminOpen, setIsAdminOpen] = useState<boolean>(false);
-  const [isArchitectureOpen, setIsArchitectureOpen] = useState<boolean>(false);
   const [isTrackingOpen, setIsTrackingOpen] = useState<boolean>(false);
   const [isFilterOpen, setIsFilterOpen] = useState<boolean>(false);
   const [trackingQuery, setTrackingQuery] = useState<string>('');
@@ -123,6 +119,11 @@ export default function App() {
       localStorage.setItem('khelcom_orders_v4', JSON.stringify(liveOrders));
     });
 
+    const unsubSettings = SupabaseService.subscribeToSettings((liveSettings) => {
+      setSettings(liveSettings);
+      localStorage.setItem('khelcom_settings_v1', JSON.stringify(liveSettings));
+    });
+
     // Secret Admin Route Detector (/khelcom_business/admin, /#admin, ?admin=1)
     const checkAdminRoute = () => {
       const hash = window.location.hash.toLowerCase();
@@ -149,6 +150,7 @@ export default function App() {
       window.removeEventListener('popstate', checkAdminRoute);
       unsubProducts();
       unsubOrders();
+      unsubSettings();
     };
   }, []);
 
@@ -490,7 +492,6 @@ export default function App() {
         cartCount={totalCartCount}
         onOpenCart={() => setIsCartOpen(true)}
         onOpenAdmin={() => setIsAdminOpen(true)}
-        onOpenArchitecture={() => setIsArchitectureOpen(true)}
         onOpenTracking={() => {
           setTrackingQuery('');
           setIsTrackingOpen(true);
@@ -505,30 +506,6 @@ export default function App() {
         searchQuery={searchQuery}
         onSearchChange={setSearchQuery}
       />
-
-      {/* Architecture & SQL Banner Callout */}
-      <div className="bg-[#240845] text-purple-100 border-b border-purple-900/60 px-3 sm:px-4 py-1.5 sm:py-2 text-[11px] sm:text-xs font-semibold shadow-xs">
-        <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-start sm:items-center justify-between gap-1.5 sm:gap-2">
-          <div className="flex items-center gap-1.5 sm:gap-2">
-            <span className="px-1.5 sm:px-2 py-0.5 rounded-full bg-orange-500 text-white text-[9px] sm:text-[10px] font-black uppercase shrink-0">
-              Phase 1 Prête
-            </span>
-            <span className="text-purple-200 truncate">
-              Gestion de stock temps réel, Guest Checkout & Schéma SQL Supabase configurés.
-            </span>
-          </div>
-
-          <button
-            type="button"
-            onClick={() => setIsArchitectureOpen(true)}
-            className="flex items-center gap-1 px-2.5 sm:px-3 py-1 rounded-lg bg-[#380e6b] text-orange-400 hover:bg-[#48138a] border border-orange-500/30 text-[11px] sm:text-xs font-bold transition-all active:scale-95 shadow-xs cursor-pointer shrink-0"
-          >
-            <Database className="w-3 sm:w-3.5 h-3 sm:h-3.5" />
-            <span>Voir Schéma SQL & Next.js</span>
-            <ChevronRight className="w-3.5 h-3.5" />
-          </button>
-        </div>
-      </div>
 
       {/* Hero Showcase Banner */}
       <HeroBanner
@@ -1061,12 +1038,6 @@ export default function App() {
         isOpen={isTrackingOpen}
         onClose={() => setIsTrackingOpen(false)}
         initialQuery={trackingQuery}
-      />
-
-      {/* 7. Architecture & Supabase SQL Script Modal */}
-      <ArchitectureModal
-        isOpen={isArchitectureOpen}
-        onClose={() => setIsArchitectureOpen(false)}
       />
 
       {/* Mobile Sticky Bottom Navigation (Mobile-First) */}

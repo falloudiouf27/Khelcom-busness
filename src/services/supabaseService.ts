@@ -446,8 +446,10 @@ export const SupabaseService = {
     }
   },
 
-  async saveSettings(settings: AppSettings): Promise<boolean> {
-    if (!this.isAvailable() || !supabase) return false;
+  async saveSettings(settings: AppSettings): Promise<{ success: boolean; error?: string }> {
+    if (!this.isAvailable() || !supabase) {
+      return { success: false, error: 'Supabase n\'est pas configuré (clés manquantes ou mode local actif).' };
+    }
     try {
       const { error } = await supabase
         .from('settings')
@@ -477,12 +479,12 @@ export const SupabaseService = {
 
       if (error) {
         console.error('[Supabase] Error saving settings:', error.message);
-        return false;
+        return { success: false, error: error.message };
       }
-      return true;
-    } catch (e) {
+      return { success: true };
+    } catch (e: any) {
       console.error('[Supabase] Exception saving settings:', e);
-      return false;
+      return { success: false, error: e?.message || 'Erreur inconnue de connexion à Supabase' };
     }
   },
 
@@ -498,6 +500,34 @@ export const SupabaseService = {
       return brands.length > 0 ? brands : null;
     } catch (e) {
       return null;
+    }
+  },
+
+  // -------------------------------------------------------------
+  // FORCE SYNC ALL LOCAL DATA TO CLOUD
+  // -------------------------------------------------------------
+  async syncAllLocalToCloud(
+    products: Product[],
+    settings: AppSettings
+  ): Promise<{ success: boolean; productsSynced: number; error?: string }> {
+    if (!this.isAvailable() || !supabase) {
+      return { success: false, productsSynced: 0, error: 'Supabase n\'est pas accessible. Vérifiez vos variables d\'environnement.' };
+    }
+    try {
+      const settingsRes = await this.saveSettings(settings);
+      if (!settingsRes.success) {
+        return { success: false, productsSynced: 0, error: settingsRes.error };
+      }
+
+      let productsSynced = 0;
+      for (const p of products) {
+        const ok = await this.upsertProduct(p);
+        if (ok) productsSynced++;
+      }
+
+      return { success: true, productsSynced };
+    } catch (err: any) {
+      return { success: false, productsSynced: 0, error: err?.message || 'Erreur inconnue' };
     }
   },
 
@@ -535,6 +565,22 @@ export const SupabaseService = {
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'order_items' }, async () => {
         const fresh = await this.fetchOrders();
+        if (fresh) onChange(fresh);
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  },
+
+  subscribeToSettings(onChange: (settings: AppSettings) => void): () => void {
+    if (!this.isAvailable() || !supabase) return () => {};
+
+    const channel = supabase
+      .channel('public:settings')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'settings' }, async () => {
+        const fresh = await this.fetchSettings();
         if (fresh) onChange(fresh);
       })
       .subscribe();
